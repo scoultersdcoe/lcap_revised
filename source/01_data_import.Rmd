@@ -1,0 +1,194 @@
+---
+title: "LCAP Data Import"
+author: "Shannon Coulter"
+date: "10/5/2021"
+output: html_document
+---
+Load data libraries for LCAP import project
+```{r load-libraries, warning=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(lubridate)
+library(here)
+library(purrr)
+library(tidyverse)
+library(readxl)
+library(stringr)
+opts_chunk$set(warning = FALSE, message = FALSE)
+options(width = 100)
+```
+
+Functions
+```{r functions, warning=FALSE, message=FALSE}
+# Use function to pick variables before binding
+pick_vars <- function(df) {
+    df %>%
+      select_at(vars(
+        County.Code,
+        District.Code, 
+        School.Code, 
+        Test.Year, 
+        Grade, 
+        Mean.Scale.Score, 
+        Test.Id,
+        CAASPP.Reported.Enrollment,
+        Test.Type,
+        Subgroup.ID,
+        Students.Tested
+      ))
+}
+#stu_test <- stu_test %>%
+  #map(pick_vars)
+
+# Function to recode variables before binding
+mutate_vars <-
+  function(df) {
+    df %>%
+      mutate(
+        Test.Id = recode(Test.Id, '1' = "ELA", '2' = "Math"),
+        Subgroup.ID = recode(Subgroup.ID, '1' = "ALL"),
+        Mean.Scale.Score = str_replace_all(Mean.Scale.Score, "[*]", "NA"),
+        Mean.Scale.Score = na_if(Mean.Scale.Score, ""),
+        Mean.Scale.Score = as.numeric(Mean.Scale.Score),
+        District.Code = as.numeric(District.Code)
+      )
+}
+```
+
+Import data
+```{r import-annual-enrollment, message=FALSE}
+# create download.file structure
+annual_enroll <- c("cLevel=School&cYear=2016-17&cCat=Enrollment&cPage=filesenr.asp", 
+                   "cLevel=School&cYear=2017-18&cCat=Enrollment&cPage=filesenr.asp", 
+                   "cLevel=School&cYear=2018-19&cCat=Enrollment&cPage=filesenr.asp", 
+                   "cLevel=School&cYear=2019-20&cCat=Enrollment&cPage=filesenr.asp",
+                   "cLevel=School&cYear=2020-21&cCat=Enrollment&cPage=filesenr.asp")
+destination_enroll <- c("../data/raw/enroll_1617.txt", "../data/raw/enroll_1718.txt", 
+                        "../data/raw/enroll_1819.txt", "../data/raw/enroll_1920.txt",
+                        "../data/raw/enroll_2021.txt")
+
+for (i in seq_along(annual_enroll)) {
+  url <- paste0("https://dq.cde.ca.gov/dataquest/dlfile/dlfile.aspx?", 
+                annual_enroll[i])
+  download.file(url, destination_enroll[i], mode = "wb")
+}
+# create file paths
+annual_enroll_files <- grep("enroll", list.files(path = "../data/raw/", full.names = TRUE),
+                            value = TRUE)
+
+#enroll <- annual_enroll_files %>%
+#map(., ~ read_delim(., "\t", escape_double = FALSE, trim_ws = TRUE))
+
+#enroll_1721 <- enroll %>%
+#bind_rows()
+
+# bind files and provide a year column
+for (i in seq_along(annual_enroll_files)) {
+  years <- c(2017, 2018, 2019, 2020, 2021) # same length and same order as files
+  tmp <- read_delim(annual_enroll_files[i],
+                    "\t", escape_double = FALSE, trim_ws = TRUE)
+  tmp$year <- years[i]
+  #my_columns <- c("CDS",	"District", "Expenditure EDP 365",	
+  #"Current Expense ADA", "Current Expense per ADA", "LEA Type", 
+  #"Year")
+  #names(tmp) <- my_columns
+  if (i == 1) {
+    annual_enroll_out <- tmp
+  } else { 
+    annual_enroll_out <- rbind(annual_enroll_out, tmp)
+  }
+  rm(tmp)
+}
+saveRDS(annual_enroll_out, file = here("output", "results", "enroll_1721.rds"))
+```
+
+```{r import-upc}
+district_upc <- c("cupc1617-k12.xls", "cupc1718-k12.xlsx", 
+                  "cupc1819-k12.xlsx", "cupc1920-k12.xlsx",
+                  "cupc2021-k12.xlsx")
+destinations_upc <- c("../data/raw/district_upc_1617", "../data/raw/district_upc_1718", 
+                      "../data/raw/district_upc_1819", "../data/raw/district_upc_1920",
+                      "../data/raw/district_upc_2021")
+
+for (i in seq_along(district_upc)) {
+  url <- paste0("https://www.cde.ca.gov/ds/ad/documents/",district_upc[i])
+  download.file(url, destinations_upc[i], mode = "wb") 
+}
+
+# fix issue in 2021
+dis_upc_1617 <- read_excel(here("data", "raw", "district_upc_1617"), sheet = 2, skip = 1)
+dis_upc_1718 <- read_excel(here("data", "raw", "district_upc_1718"), sheet = 2, skip = 1)
+dis_upc_1819 <- read_excel(here("data", "raw", "district_upc_1819"), sheet = 2, skip = 1)
+dis_upc_1920 <- read_excel(here("data", "raw", "district_upc_1920"), sheet = 2, skip = 1)
+dis_upc_2021 <- read_excel(here("data", "raw", "district_upc_2021"), sheet = 2, skip = 1)
+
+dis_upc_2021 <- dis_upc_2021 %>% select(-c("Tribal Foster Youth"))
+
+names(dis_upc_1617) <- names(dis_upc_2021)
+names(dis_upc_1617) <- names(dis_upc_1718)
+names(dis_upc_1617) <- names(dis_upc_1819)
+names(dis_upc_1617) <- names(dis_upc_1920)
+
+saveRDS(dis_upc_1617, file = here("data", "raw", "dis_upc_1617"))
+saveRDS(dis_upc_1718, file = here("data", "raw", "dis_upc_1718"))
+saveRDS(dis_upc_1819, file = here("data", "raw", "dis_upc_1819"))
+saveRDS(dis_upc_1920, file = here("data", "raw", "dis_upc_1920"))
+saveRDS(dis_upc_2021, file = here("data", "raw", "dis_upc_2021"))
+
+
+
+# list all files
+district_upc_files <- grep("dis_upc", list.files("../data/raw", full.names = TRUE), 
+                      value = TRUE)
+
+# bind files
+for (i in seq_along(district_upc_files)) {
+  years <- c(2017, 2018, 2019, 2020, 2021) # same length and same order as files
+  tmp <- readRDS(district_upc_files[i])
+  tmp$year <- years[i]
+  if (i == 1) {
+    district_upc_out <- tmp
+  } else { 
+    district_upc_out <- rbind(district_upc_out, tmp)
+  }
+  rm(tmp)
+}
+
+saveRDS(district_upc_out, file = here("output", "results", "upc_1721.rds"))
+
+```
+
+```{r import-[item 1]}
+
+```
+
+```{r import-[item 1]}
+
+```
+
+```{r import-[item 1]}
+
+```
+
+```{r import-[item 1]}
+
+```
+
+```{r import-[item 1]}
+
+```
+
+```{r import-[item 1]}
+
+```
+
+Data wrangling. Clean, tidy, and transfrom data.
+```{r data-wrangling}
+
+```
+
+Output data file
+```{r save-file}
+
+```
+
